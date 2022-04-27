@@ -13,12 +13,12 @@ use eframe::egui::{
 };
 use eframe::epi::App;
 use kson::{BgmInfo, Chart, MetaInfo};
-use puffin::profile_scope;
 use serde::{Deserialize, Serialize};
 
 mod action_stack;
 mod chart_camera;
 mod chart_editor;
+mod dsp;
 mod playback;
 mod tools;
 mod utils;
@@ -458,13 +458,14 @@ pub fn rect_xy_wh(rect: [f32; 4]) -> Rect {
     Rect::from_x_y_ranges(x..=x + w, y..=y + h)
 }
 
-const TOOLS: [(&str, ChartTool); 6] = [
+const TOOLS: [(&str, ChartTool); 7] = [
     ("BT", ChartTool::BT),
     ("FX", ChartTool::FX),
     ("LL", ChartTool::LLaser),
     ("RL", ChartTool::RLaser),
     ("BPM", ChartTool::BPM),
     ("TS", ChartTool::TimeSig),
+    ("CAM", ChartTool::Camera),
 ];
 
 impl AppState {
@@ -685,6 +686,11 @@ impl App for AppState {
                             }
                         }
                     }
+                    ui.add(
+                        Slider::new(&mut self.editor.screen.beat_divider, 1..=8)
+                            .clamp_to_range(true)
+                            .text("Beat Divider"),
+                    );
                 })
             });
         }
@@ -780,7 +786,6 @@ impl App for AppState {
                 // Move the tool out of the editor state so it can't modify itself in unexpected ways. Pleases borrow checker.
                 let mut borrowed_tool = self.editor.cursor_object.take();
                 if let Some(tool) = borrowed_tool.as_mut() {
-                    profile_scope!("Tool UI");
                     tool.draw_ui(&mut self.editor, ctx);
                 }
                 self.editor.cursor_object = borrowed_tool;
@@ -802,7 +807,7 @@ impl App for AppState {
                         self.editor.primary_clicked(pos)
                     }
 
-                    if response.middle_clicked() {
+                    if response.secondary_clicked() {
                         self.editor.middle_clicked(pos)
                     }
 
@@ -859,11 +864,6 @@ impl App for AppState {
 
 fn main() -> Result<()> {
     env_logger::init();
-    #[cfg(feature = "profiling")]
-    {
-        start_puffin_server();
-    }
-
     let options = eframe::NativeOptions {
         drag_and_drop_support: false,
         multisampling: 4,
@@ -899,24 +899,4 @@ fn main() -> Result<()> {
             Box::new(app)
         }),
     );
-}
-
-//https://github.com/emilk/egui/blob/master/examples/puffin_profiler/src/main.rs
-#[cfg(feature = "profiling")]
-fn start_puffin_server() {
-    puffin::set_scopes_on(true); // tell puffin to collect data
-
-    match puffin_http::Server::new("0.0.0.0:8585") {
-        Ok(puffin_server) => {
-            log::info!("Run:  cargo install puffin_viewer && puffin_viewer --url 127.0.0.1:8585");
-
-            // We can store the server if we want, but in this case we just want
-            // it to keep running. Dropping it closes the server, so let's not drop it!
-            #[allow(clippy::mem_forget)]
-            std::mem::forget(puffin_server);
-        }
-        Err(err) => {
-            log::error!("Failed to start puffin server: {}", err);
-        }
-    };
 }

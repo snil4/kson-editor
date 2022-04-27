@@ -12,7 +12,6 @@ use eframe::epaint::FontId;
 use egui::Ui;
 use kson::{GraphPoint, GraphSectionPoint, Interval, Ksh, Vox};
 use log::debug;
-use puffin::profile_scope;
 use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -20,6 +19,19 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
+
+#[cfg(feature = "profiling")]
+macro_rules! profile_scope {
+    ($string:expr) => {
+        let _profile_scope =
+            thread_profiler::ProfileScope::new(format!("{}: {}", module_path!(), $string));
+    };
+}
+
+#[cfg(not(feature = "profiling"))]
+macro_rules! profile_scope {
+    ($string:expr) => {};
+}
 
 pub const EGUI_ID: &str = "chart_editor";
 
@@ -51,6 +63,7 @@ pub struct ScreenState {
     pub x_offset: f32,
     pub x_offset_target: f32,
     pub beat_res: u32,
+    pub beat_divider: u32
 }
 
 impl ScreenState {
@@ -266,6 +279,7 @@ impl MainState {
                 x_offset: 0.0,
                 x_offset_target: 0.0,
                 beat_res: 48,
+                beat_divider: 2
             },
             gui_event_queue: VecDeque::new(),
             save_path,
@@ -283,7 +297,7 @@ impl MainState {
 
     pub fn get_cursor_ms_from_mouse(&self) -> f64 {
         let tick = self.screen.pos_to_tick(self.mouse_x, self.mouse_y);
-        let tick = tick - (tick % (self.chart.beat.resolution / 2));
+        let tick = tick - (tick % (self.chart.beat.resolution / self.screen.beat_divider));
         self.chart.tick_to_ms(tick)
     }
 
@@ -855,11 +869,10 @@ impl MainState {
     }
 
     pub fn draw(&mut self, ui: &Ui) -> Result<Response> {
-        puffin::profile_function!();
-
         ui.make_persistent_id(EGUI_ID);
         self.resize_event(ui.max_rect());
 
+        profile_scope!("Draw Chart");
         let painter = ui.painter_at(ui.max_rect());
         //draw notes
         let mut track_line_builder = Vec::new();
@@ -1080,7 +1093,6 @@ impl MainState {
         }
 
         if let Some(cursor) = &self.cursor_object {
-            profile_scope!("Tool");
             cursor
                 .draw(self, &painter)
                 .unwrap_or_else(|e| println!("{}", e));
@@ -1166,7 +1178,7 @@ impl MainState {
             let res = self.chart.beat.resolution;
             let lane = self.screen.pos_to_lane(x);
             let tick = self.screen.pos_to_tick(x, y);
-            let tick = tick - (tick % (res / 2));
+            let tick = tick - (tick % (res / self.screen.beat_divider));
             let tick_f = self.screen.pos_to_tick_f(x, y);
             if let Some(ref mut cursor) = self.cursor_object {
                 cursor.drag_start(
@@ -1188,7 +1200,7 @@ impl MainState {
             let lane = self.screen.pos_to_lane(x);
             let tick = self.screen.pos_to_tick(x, y);
             let tick_f = self.screen.pos_to_tick_f(x, y);
-            let tick = tick - (tick % (self.chart.beat.resolution / 2));
+            let tick = tick - (tick % (self.chart.beat.resolution / self.screen.beat_divider));
             if let Some(cursor) = &mut self.cursor_object {
                 cursor.drag_end(
                     self.screen,
@@ -1218,7 +1230,8 @@ impl MainState {
         let lane = self.screen.pos_to_lane(pos.x);
         let tick = self.screen.pos_to_tick(pos.x, pos.y);
         let tick_f: f64 = self.screen.pos_to_tick_f(pos.x, pos.y);
-        let tick = tick - (tick % (self.chart.beat.resolution / 2));
+        // Beat divider RIGHT HERE ˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘˘
+        let tick = tick - (tick % (self.chart.beat.resolution / self.screen.beat_divider));
 
         (lane, tick, tick_f)
     }
